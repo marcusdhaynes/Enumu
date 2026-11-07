@@ -29,7 +29,7 @@ fn apply_renames(changes: Vec<Rename>) -> Result<String, String> {
     for change in changes {
         let from = PathBuf::from(&change.from);
         if !from.exists() { return Err(format!("Missing source: {}", from.display())); }
-        if change.to_name.is_empty() || change.to_name == "." || change.to_name == ".." || change.to_name.contains('/') || change.to_name.contains('\\\\') || change.to_name.contains('\\0') { return Err("Invalid target name".into()); }
+        if change.to_name.is_empty() || change.to_name == "." || change.to_name == ".." || change.to_name.contains('/') || change.to_name.contains('\\') || change.to_name.contains('\0') { return Err("Invalid target name".into()); }
         let dest = from.parent().unwrap_or(Path::new("")).join(&change.to_name);
         if dest == from { continue; }
         if !sources.insert(from.clone()) || !targets.insert(dest.clone()) { return Err("Duplicate source or target".into()); }
