@@ -50,6 +50,8 @@ jobs:
         with:
           workspaces: src-tauri
       - run: npm install
+      - name: Generate platform icons
+        run: npm run tauri icon src-tauri/icons/icon.svg
       - run: npm run tauri build
       - uses: actions/upload-artifact@v4
         with:
@@ -72,6 +74,8 @@ jobs:
         with:
           workspaces: src-tauri
       - run: npm install
+      - name: Generate platform icons
+        run: npm run tauri icon src-tauri/icons/icon.svg
       - name: Prepare Android project
         run: npm run tauri android init -- --ci
       - name: Build Android APK
@@ -96,6 +100,8 @@ jobs:
         with:
           workspaces: src-tauri
       - run: npm install
+      - name: Generate platform icons
+        run: npm run tauri icon src-tauri/icons/icon.svg
       - name: Prepare iOS project
         run: npm run tauri ios init -- --ci
       - name: Build iOS simulator
