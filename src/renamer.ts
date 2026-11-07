@@ -15,7 +15,7 @@ export function plan(entries: Entry[], s: Settings): Preview[] {
     const number = s.numbered ? String(s.start + i * s.step).padStart(Math.max(1, Math.min(12, s.digits)), '0') : '';
     name = name.slice(0, position) + s.add + number + name.slice(position);
     const target = name + ext;
-    const error = !name || name === '.' || name === '..' || target.includes('/') || target.includes('\\') || target.includes('\\0') ? 'Invalid filename' : undefined;
+    const error = !name || name === '.' || name === '..' || target.includes('/') || target.includes('\\') || target.includes('\0') ? 'Invalid filename' : undefined;
     return { ...entry, target, valid: !error, error };
   });
   const seen = new Map<string, number>();
