@@ -46,18 +46,22 @@ fn list_folder(folder: String) -> Result<Vec<Entry>, String> {
 // Picker calls run on the Rust side, so the frontend never invokes plugin:dialog|open.
 // This also avoids the frontend dialog ACL error on previously misconfigured windows.
 #[tauri::command]
-fn choose_files(app: tauri::AppHandle) -> Result<Vec<String>, String> {
-    app.dialog().file().blocking_pick_files().unwrap_or_default()
-        .into_iter()
-        .map(|file| file.into_path().map(|p| p.to_string_lossy().into_owned()).map_err(|e| e.to_string()))
-        .collect()
+async fn choose_files(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.dialog().file().blocking_pick_files().unwrap_or_default()
+            .into_iter()
+            .map(|file| file.into_path().map(|p| p.to_string_lossy().into_owned()).map_err(|e| e.to_string()))
+            .collect()
+    }).await.map_err(|e| e.to_string())?
 }
 #[cfg(desktop)]
 #[tauri::command]
-fn choose_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
-    app.dialog().file().blocking_pick_folder()
-        .map(|file| file.into_path().map(|p| p.to_string_lossy().into_owned()).map_err(|e| e.to_string()))
-        .transpose()
+async fn choose_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.dialog().file().blocking_pick_folder()
+            .map(|file| file.into_path().map(|p| p.to_string_lossy().into_owned()).map_err(|e| e.to_string()))
+            .transpose()
+    }).await.map_err(|e| e.to_string())?
 }
 #[cfg(mobile)]
 #[tauri::command]
