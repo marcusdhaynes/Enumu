@@ -15,10 +15,16 @@ struct History(Mutex<Vec<Vec<(PathBuf, PathBuf)>>>);
 #[tauri::command]
 fn list_folder(folder: String) -> Result<Vec<Entry>, String> {
     let mut entries = Vec::new();
-    for result in fs::read_dir(&folder).map_err(|e| e.to_string())? {
-        let e = result.map_err(|e| e.to_string())?;
-        let file_type = e.file_type().map_err(|e| e.to_string())?;
-        entries.push(Entry { path: e.path().to_string_lossy().into_owned(), name: e.file_name().to_string_lossy().into_owned(), directory: file_type.is_dir() });
+    let mut pending = vec![PathBuf::from(folder)];
+    while let Some(directory) = pending.pop() {
+        for result in fs::read_dir(&directory).map_err(|e| e.to_string())? {
+            let e = result.map_err(|e| e.to_string())?;
+            let file_type = e.file_type().map_err(|e| e.to_string())?;
+            if file_type.is_dir() { pending.push(e.path()); }
+            else if file_type.is_file() {
+                entries.push(Entry { path: e.path().to_string_lossy().into_owned(), name: e.file_name().to_string_lossy().into_owned(), directory: false });
+            }
+        }
     }
     entries.sort_by(|a,b| a.name.cmp(&b.name));
     Ok(entries)
