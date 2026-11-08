@@ -6,7 +6,6 @@
   let status = $state('Ready');
   let settings: Settings = $state({ mode: 'add', kind: 'text', text: '', position: 0, fromEnd: false, start: 1, digits: 2, hideExtension: true });
   let dragOver = $state(false);
-  let sampleOpen = $state(false);
   let preview = $derived(plan(entries, settings));
   let conflicts = $derived(preview.filter(x => !x.valid).length);
   let native = '__TAURI_INTERNALS__' in window;
@@ -42,7 +41,7 @@
     try { const result = await invoke<string>('apply_renames', { changes: preview.filter(p => p.name !== p.target).map(p => ({ from: p.path, to_name: p.target })) }); status = result; entries = []; }
     catch (e) { status = 'Rename failed: ' + String(e); }
   }
-  function demo() { entries = [{ path: 'demo/Summer Holiday.jpg', name: 'Summer Holiday.jpg' }, { path: 'demo/Portrait Final.png', name: 'Portrait Final.png' }, { path: 'demo/Project Notes.pdf', name: 'Project Notes.pdf' }]; status = 'Sample filenames loaded for preview'; sampleOpen = true; }
+  function demo() { entries = [{ path: 'demo/Summer Holiday.jpg', name: 'Summer Holiday.jpg' }, { path: 'demo/Portrait Final.png', name: 'Portrait Final.png' }, { path: 'demo/Project Notes.pdf', name: 'Project Notes.pdf' }]; status = 'Sample filenames loaded for preview'; }
   function shown(name: string, dir = false) { return settings.hideExtension ? splitName(name, dir)[0] : name; }
 </script>
 <svelte:head><title>Enumu — Batch Renamer</title><meta name="description" content="A beautifully simple, fast batch file renamer."/></svelte:head>
@@ -80,7 +79,7 @@
           <div class="queue-table"><div class="queue-header"><span>ORIGINAL NAME</span><span>NEW NAME <span class="arrow">↗</span></span></div><div class="queue-scroll">{#each preview.slice(0,500) as item}<div class="queue-row"><div class="filename"><span class="file-glyph">{item.directory ? '▤' : '▧'}</span><span title={item.name}>{shown(item.name,item.directory)}</span></div><div class="filename new" class:invalid={!item.valid}><span title={item.target}>{shown(item.target,item.directory)}</span>{#if item.error}<span class="error">{item.error}</span>{/if}</div></div>{/each}{#if preview.length > 500}<div class="more">Showing 500 of {preview.length.toLocaleString()} items</div>{/if}</div></div>
           <div class="queue-add">{#if native}<button class="secondary" onclick={addPaths}>＋ Add Files</button><button class="secondary" onclick={addFolder}>▤ Add Folder</button>{:else}<label class="secondary file-pick">＋ Add More Files<input type="file" multiple onchange={webFiles} hidden /></label>{/if}</div>
         {/if}
-        <div class="queue-footer"><div class="footer-meta"><span class="footer-status" class:error-status={conflicts > 0}>{conflicts ? conflicts + ' conflicts detected' : status}</span><small>{native ? 'Native file operations' : 'Preview mode · No files modified'}</small></div><button class="apply" disabled={!native || !entries.length || conflicts > 0 || changed === 0 || sampleOpen} onclick={apply}>{native ? 'Apply Renames' : 'Preview Only'} <span>↗</span></button></div>
+        <div class="queue-footer"><div class="footer-meta"><span class="footer-status" class:error-status={conflicts > 0}>{conflicts ? conflicts + ' conflicts detected' : status}</span><small>{native ? 'Native file operations' : 'Preview mode · No files modified'}</small></div><button class="apply" disabled={!native || !entries.length || conflicts > 0 || changed === 0 || entries.some(x => x.path.startsWith('demo/'))} onclick={apply}>{native ? 'Apply Renames' : 'Preview Only'} <span>↗</span></button></div>
       </section>
     </div>
     <div class="bottom"><span>ENUMU <b>·</b> MADE FOR THE DETAILS</span><span>Fast by design <span class="bottom-star">✦</span> Private by default</span></div>
