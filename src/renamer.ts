@@ -1,5 +1,5 @@
 export type Entry = { path: string; name: string; directory?: boolean };
-export type Settings = { add: string; remove: string; position: number; fromEnd: boolean; numbered: boolean; start: number; step: number; digits: number; hideExtension: boolean };
+export type Settings = { mode: 'add' | 'remove'; kind: 'text' | 'numbering'; text: string; position: number; fromEnd: boolean; start: number; digits: number; hideExtension: boolean };
 export type Preview = Entry & { target: string; valid: boolean; error?: string };
 export function splitName(name: string, directory = false): [string, string] {
   if (directory) return [name, ''];
@@ -9,13 +9,20 @@ export function splitName(name: string, directory = false): [string, string] {
 export function plan(entries: Entry[], s: Settings): Preview[] {
   const planned = entries.map((entry, i) => {
     const [original, ext] = splitName(entry.name, entry.directory);
+    const offset = Number.isFinite(s.position) ? Math.max(0, Math.trunc(s.position)) : 0;
+    const position = Math.max(0, Math.min(original.length, s.fromEnd ? original.length - offset : offset));
+    const digits = Number.isFinite(s.digits) ? Math.max(1, Math.min(12, Math.trunc(s.digits))) : 1;
+    const start = Number.isFinite(s.start) ? Math.trunc(s.start) : 1;
+    const token = s.kind === 'numbering' ? String(start + i).padStart(digits, '0') : s.text;
     let name = original;
-    if (s.remove) name = name.split(s.remove).join('');
-    const position = Math.max(0, Math.min(name.length, s.fromEnd ? name.length - s.position : s.position));
-    const number = s.numbered ? String(s.start + i * s.step).padStart(Math.max(1, Math.min(12, s.digits)), '0') : '';
-    name = name.slice(0, position) + s.add + number + name.slice(position);
+    if (s.mode === 'add') name = original.slice(0, position) + token + original.slice(position);
+    else if (s.kind === 'numbering') name = original.slice(0, position) + original.slice(Math.min(original.length, position + digits));
+    else if (token) {
+      const index = original.indexOf(token, position);
+      if (index >= 0) name = original.slice(0, index) + original.slice(index + token.length);
+    }
     const target = name + ext;
-    const error = !name || name === '.' || name === '..' || target.includes('/') || target.includes('\\') || target.includes('\0') ? 'Invalid filename' : undefined;
+    const error = !name || name === '.' || name === '..' || /[\\/\0]/.test(target) ? 'Invalid filename' : undefined;
     return { ...entry, target, valid: !error, error };
   });
   const seen = new Map<string, number>();
