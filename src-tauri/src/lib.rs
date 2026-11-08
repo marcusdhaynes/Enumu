@@ -13,6 +13,11 @@ struct Rename { from: String, to_name: String }
 struct BatchResult { count: usize, remaining: usize, entries: Vec<Entry>, previous: Vec<String> }
 struct History(Mutex<Vec<Vec<(PathBuf, PathBuf)>>>);
 
+// Distinguishes Enumu's native runtime from an unrelated Tauri-based browser.
+#[tauri::command]
+fn enumu_runtime_info() -> &'static str {
+    "com.somniel.enumu"
+}
 #[tauri::command]
 fn expand_paths(paths: Vec<String>) -> Result<Vec<Entry>, String> {
     let mut entries = Vec::new();
@@ -132,7 +137,7 @@ pub fn run() {
     tauri::Builder::default()
       .manage(History(Mutex::new(Vec::new())))
       .plugin(tauri_plugin_dialog::init())
-      .invoke_handler(tauri::generate_handler![list_folder,expand_paths,choose_files,choose_folder,apply_renames,undo_renames,undo_count])
+      .invoke_handler(tauri::generate_handler![enumu_runtime_info,list_folder,expand_paths,choose_files,choose_folder,apply_renames,undo_renames,undo_count])
       .run(tauri::generate_context!())
       .expect("error while running Enumu");
 }
