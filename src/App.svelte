@@ -245,29 +245,29 @@
   function demo() { entries = [{ path: 'demo/Summer Holiday.jpg', name: 'Summer Holiday.jpg' }, { path: 'demo/Portrait Final.png', name: 'Portrait Final.png' }, { path: 'demo/Project Notes.pdf', name: 'Project Notes.pdf' }]; selected = new Set(entries.map(e => e.path)); status = 'Sample filenames loaded for preview'; }
   function shown(name: string, dir = false) { return settings.hideExtension ? splitName(name, dir)[0] : name; }
 </script>
-<svelte:head><title>Enumu — Batch Renamer</title><meta name="description" content="A beautifully simple, fast batch file renamer."/></svelte:head>
+<svelte:head><title>Enumu</title><meta name="description" content="A beautifully simple, fast batch file renamer."/></svelte:head>
 <svelte:window onkeydown={keys} ondragover={dragOverWindow} ondrop={dropFilesAndFolders} ondragend={() => dragOver = false}/><div class="shell">
-  <header class="topbar"><div class="brand"><div class="brandmark"><span>≡</span><i></i></div><span>enumu</span><span class="version">/ rename studio</span></div><div class="topright"><span class="live-dot"></span>{native ? 'Desktop workspace' : 'Web preview'}<span class="divider"></span><span class="privacy">● Local only</span></div></header>
+  <header class="topbar"><div class="brand"><div class="brandmark"><span>≡</span><i></i></div><span>Enumu</span></div><div class="topright"><span class="live-dot"></span>{native ? 'Desktop workspace' : 'Web preview'}<span class="divider"></span><span class="privacy">● Local only</span></div></header>
   <main>
     <div class="workspace">
       <section class="editor">
-        <div class="section-title"><div class="title-left"><span class="section-index">01</span><div><h2>Rename Rules</h2><p>Instant preview</p></div></div><span class="section-hint">LIVE PREVIEW <span class="live-dot"></span></span></div>
+        <div class="section-title"><div class="title-left"><span class="section-index">01</span><div><h2>Rename Rules</h2></div></div><span class="section-hint">LIVE PREVIEW <span class="live-dot"></span></span></div>
         <div class="editor-body">
-          <div class="field-block"><div class="field-heading"><label>Action</label><small>What would you like to do?</small></div><div class="segment" role="group" aria-label="Action"><button class:active={settings.mode === 'add'} onclick={() => settings.mode = 'add'}><span class="symbol">＋</span> Add</button><button class:active={settings.mode === 'remove'} onclick={() => settings.mode = 'remove'}><span class="symbol">−</span> Remove</button></div></div>
+          <div class="field-block"><div class="field-heading"><label>Action</label></div><div class="segment" role="group" aria-label="Action"><button class:active={settings.mode === 'add'} onclick={() => settings.mode = 'add'}><span class="symbol">＋</span> Add</button><button class:active={settings.mode === 'remove'} onclick={() => settings.mode = 'remove'}><span class="symbol">−</span> Remove</button></div></div>
           <div class="rule"></div>
-          <div class="field-block"><div class="field-heading"><label>Content Type</label><small>Choose what to {settings.mode}</small></div><div class="segment" role="group" aria-label="Content Type"><button class:active={settings.kind === 'text'} onclick={() => settings.kind = 'text'}><span class="symbol">Aa</span> Text Box</button><button class:active={settings.kind === 'numbering'} onclick={() => settings.kind = 'numbering'}><span class="symbol">#</span> Numbering</button></div></div>
+          <div class="field-block"><div class="field-heading"><label>Content Type</label></div><div class="segment" role="group" aria-label="Content Type"><button class:active={settings.kind === 'text'} onclick={() => settings.kind = 'text'}><span class="symbol">Aa</span> Text Box</button><button class:active={settings.kind === 'numbering'} onclick={() => settings.kind = 'numbering'}><span class="symbol">#</span> Numbering</button></div></div>
           {#if settings.kind === 'text'}
-            <div class="field-block inset"><label for="content">Text {settings.mode === 'add' ? 'to Add' : 'to Remove'}</label><input id="content" type="text" bind:value={settings.text} placeholder={settings.mode === 'add' ? 'Enter text to insert…' : 'Enter text to find and remove…'} spellcheck="false" /><small class="input-help">{settings.mode === 'add' ? 'Inserted at your chosen character position.' : 'Removes the first matching text at or after your chosen position.'}</small></div>
+            <div class="field-block inset"><label for="content">Text {settings.mode === 'add' ? 'to Add' : 'to Remove'}</label><input id="content" type="text" bind:value={settings.text} placeholder={settings.mode === 'add' ? 'Enter text to insert…' : 'Enter text to find and remove…'} spellcheck="false" /></div>
           {:else}
-            <div class="two-col inset"><div class="field-block"><label for="start">Start From</label><div class="input-wrap"><span class="input-icon">↗</span><input id="start" type="number" bind:value={settings.start} disabled={settings.mode === 'remove'} /></div></div><div class="field-block"><label for="digits"># Digits</label><div class="input-wrap"><span class="input-icon">#</span><input id="digits" type="number" min="1" max="12" bind:value={settings.digits}/></div></div></div>
+            <div class="two-col inset"><div class="field-block"><label for="start">Start Number</label><div class="input-wrap stepper"><input id="start" type="number" bind:value={settings.start} disabled={settings.mode === 'remove'} /><div class="step-buttons"><button aria-label="Increase Start Number" onclick={() => settings.start = (Number(settings.start) || 0) + 1} disabled={settings.mode === 'remove'}>⌃</button><button aria-label="Decrease Start Number" onclick={() => settings.start = (Number(settings.start) || 0) - 1} disabled={settings.mode === 'remove'}>⌄</button></div></div></div><div class="field-block"><label for="digits"># Digits</label><div class="input-wrap stepper"><input id="digits" type="number" min="1" max="12" bind:value={settings.digits}/><div class="step-buttons"><button aria-label="Increase Digits" onclick={() => settings.digits = Math.min(12,(Number(settings.digits) || 1) + 1)}>⌃</button><button aria-label="Decrease Digits" onclick={() => settings.digits = Math.max(1,(Number(settings.digits) || 1) - 1)}>⌄</button></div></div></div></div>
           {/if}
           <div class="rule"></div>
-          <div class="field-block"><div class="field-heading"><label>Position</label><small>Where should the change happen?</small></div><div class="position-line"><div class="input-wrap position-input"><span class="input-icon">⌗</span><input aria-label="Character position" type="number" min="0" bind:value={settings.position}/></div><div class="segment position-segment" role="group" aria-label="Position From"><button class:active={!settings.fromEnd} onclick={() => settings.fromEnd = false}>From Beginning</button><button class:active={settings.fromEnd} onclick={() => settings.fromEnd = true}>From End</button></div></div><small class="input-help">0 = the very {settings.fromEnd ? 'end' : 'beginning'} of the filename, excluding its extension.</small></div>
+          <div class="field-block"><div class="field-heading"><label>Start From</label><small>Character offset</small></div><div class="position-line"><div class="input-wrap position-input stepper"><input aria-label="Character position" type="number" min="0" bind:value={settings.position}/><div class="step-buttons"><button aria-label="Increase Position" onclick={() => settings.position = Math.max(0,(Number(settings.position) || 0) + 1)}>⌃</button><button aria-label="Decrease Position" onclick={() => settings.position = Math.max(0,(Number(settings.position) || 0) - 1)}>⌄</button></div></div><div class="segment position-segment" role="group" aria-label="Start From"><button class:active={!settings.fromEnd} onclick={() => settings.fromEnd = false}>From Beginning</button><button class:active={settings.fromEnd} onclick={() => settings.fromEnd = true}>From End</button></div></div><small class="input-help">0 = {settings.fromEnd ? 'end' : 'beginning'} of filename · extension excluded</small></div>
         </div>
         <div class="editor-foot"><span><span class="tiny-sparkle">✧</span> Non-destructive preview</span><button class="reset" onclick={() => settings = { mode: 'add', kind: 'text', text: '', position: 0, fromEnd: false, start: 1, digits: 2, hideExtension: true }}>↺ Reset Rules</button></div>
       </section>
       <section class="files">
-        <div class="section-title"><div class="title-left"><span class="section-index">02</span><div><h2>Files <span class="count">{entries.length.toLocaleString()}</span></h2><p>Select files to rename</p></div></div><button class="clear" onclick={() => { entries = []; selected = new Set(); collapsed = new Set(); roots = []; status = 'Queue cleared'; }} disabled={!entries.length}>Clear All ×</button></div>
+        <div class="section-title"><div class="title-left"><span class="section-index">02</span><div><h2>Files <span class="count">{entries.length.toLocaleString()}</span></h2></div></div><button class="clear" onclick={() => { entries = []; selected = new Set(); collapsed = new Set(); roots = []; status = 'Queue cleared'; }} disabled={!entries.length}>Clear All ×</button></div>
         <div class="queue-tools"><div class="queue-caption"><span class="live-dot"></span> {entries.length ? chosen.length + ' selected · ' + changed + ' changes' : 'Awaiting files'}</div><div class="selection-tools"><button onclick={selectAll} disabled={!entries.length}>All</button><button onclick={selectNone} disabled={!chosen.length}>None</button><button onclick={undo} disabled={!native || !undoDepth || busy}>↶ Undo {undoDepth}/100</button></div><label class="switch-label"><input type="checkbox" bind:checked={settings.hideExtension}/><span class="switch"></span> Hide extensions</label></div>
         {#if !entries.length}
           <div class="dropzone" class:dragover={dragOver}>
@@ -331,4 +331,25 @@ main{max-width:1480px;padding:12px 12px 10px}
 @media(max-width:760px){.workspace{grid-template-columns:1fr}.topbar{padding:0 12px}main{padding:9px}.editor-body{padding:10px}.section-title{padding:7px 10px}.dropzone{min-height:110px}.queue-scroll{max-height:50vh}}
 .file-indent{flex:none}.folder-toggle{flex:none;border:0;background:transparent;color:#a7baff;padding:0 2px;font-size:13px}.filename{min-width:0}.filename .file-glyph{flex:none}.queue-scroll{overflow:auto}
 .drop-tip{display:inline-flex;align-items:center;color:#afc1ed;font-size:10px;font-weight:600;padding:4px 8px;border:1px dashed #5a6c8c;border-radius:6px}.dropzone.dragover,.shell:has(.dropzone.dragover) .files{border-color:#b6c5ff;box-shadow:0 0 0 2px #758fee33}.queue-add{flex-wrap:wrap;align-items:center}
+/* Condensed density pass */
+main{padding:7px 8px 6px}.workspace{gap:6px;grid-template-columns:minmax(270px,305px) minmax(0,1fr)}
+.topbar{height:36px}.brand{font-size:15px;letter-spacing:-.035em}.brandmark{width:21px;height:21px}
+.section-title{height:37px;padding:5px 9px}.section-title p{display:none}.section-index{width:20px;height:20px}
+.editor-body{padding:8px 9px}.field-heading{margin-bottom:4px}.segment button{padding:5px 5px}
+.rule{margin:7px 0}.inset{margin-top:7px}
+.field-block input,.input-wrap{height:28px}.field-block>input{margin-top:4px}
+.position-segment button{padding:5px 2px}.position-input{width:78px}
+.editor-foot{padding:5px 9px}.queue-tools{padding:5px 8px}
+.queue-row{padding:4px 7px}.queue-header{padding:5px 7px}
+.queue-footer{padding:5px 8px}.queue-add{padding:5px 8px}
+.dropzone{min-height:90px;margin:5px 8px;padding:8px}.dropzone p{margin-bottom:6px}
+.bottom{margin-top:5px}
+.stepper{padding:0 0 0 8px;gap:0;overflow:hidden}
+.stepper input[type=number]{appearance:textfield;-moz-appearance:textfield;padding:0 5px 0 0}
+.stepper input[type=number]::-webkit-outer-spin-button,.stepper input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.step-buttons{display:flex;flex-direction:column;height:100%;width:25px;flex:none;border-left:1px solid #354053}
+.step-buttons button{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;background:#1e2a3d;color:#b6c7e7;border:0;padding:0;font-size:13px;line-height:1;cursor:pointer}
+.step-buttons button:first-child{border-bottom:1px solid #354053}.step-buttons button:hover:not(:disabled){background:#3a4b70;color:white}
+.step-buttons button:disabled{opacity:.3;cursor:not-allowed}
+@media(max-width:760px){.workspace{grid-template-columns:1fr}main{padding:6px}}
 </style>
