@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use tauri_plugin_dialog::DialogExt;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -13,21 +14,55 @@ struct BatchResult { count: usize, remaining: usize, entries: Vec<Entry>, previo
 struct History(Mutex<Vec<Vec<(PathBuf, PathBuf)>>>);
 
 #[tauri::command]
-fn list_folder(folder: String) -> Result<Vec<Entry>, String> {
+fn expand_paths(paths: Vec<String>) -> Result<Vec<Entry>, String> {
     let mut entries = Vec::new();
-    let mut pending = vec![PathBuf::from(folder)];
-    while let Some(directory) = pending.pop() {
-        for result in fs::read_dir(&directory).map_err(|e| e.to_string())? {
-            let e = result.map_err(|e| e.to_string())?;
-            let file_type = e.file_type().map_err(|e| e.to_string())?;
-            if file_type.is_dir() { pending.push(e.path()); }
-            if file_type.is_dir() || file_type.is_file() {
-                entries.push(Entry { path: e.path().to_string_lossy().into_owned(), name: e.file_name().to_string_lossy().into_owned(), directory: file_type.is_dir() });
+    let mut visited = HashSet::new();
+    let mut pending: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
+    while let Some(path) = pending.pop() {
+        if !visited.insert(path.clone()) { continue; }
+        let metadata = fs::symlink_metadata(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        if metadata.file_type().is_symlink() {
+            entries.push(Entry {
+                path: path.to_string_lossy().into_owned(),
+                name: path.file_name().unwrap_or_default().to_string_lossy().into_owned(),
+                directory: false,
+            });
+        } else if metadata.is_dir() {
+            entries.push(to_entry(&path));
+            for result in fs::read_dir(&path).map_err(|e| format!("{}: {e}", path.display()))? {
+                pending.push(result.map_err(|e| e.to_string())?.path());
             }
+        } else if metadata.is_file() {
+            entries.push(to_entry(&path));
         }
     }
-    entries.sort_by(|a,b| a.name.cmp(&b.name));
+    entries.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(entries)
+}
+#[tauri::command]
+fn list_folder(folder: String) -> Result<Vec<Entry>, String> {
+    expand_paths(vec![folder])
+}
+// Picker calls run on the Rust side, so the frontend never invokes plugin:dialog|open.
+// This also avoids the frontend dialog ACL error on previously misconfigured windows.
+#[tauri::command]
+fn choose_files(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    app.dialog().file().blocking_pick_files().unwrap_or_default()
+        .into_iter()
+        .map(|file| file.into_path().map(|p| p.to_string_lossy().into_owned()).map_err(|e| e.to_string()))
+        .collect()
+}
+#[cfg(desktop)]
+#[tauri::command]
+fn choose_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    app.dialog().file().blocking_pick_folder()
+        .map(|file| file.into_path().map(|p| p.to_string_lossy().into_owned()).map_err(|e| e.to_string()))
+        .transpose()
+}
+#[cfg(mobile)]
+#[tauri::command]
+fn choose_folder(_app: tauri::AppHandle) -> Result<Option<String>, String> {
+    Err("The native folder picker is unavailable on this mobile platform.".into())
 }
 fn to_entry(path: &Path) -> Entry {
     Entry { path: path.to_string_lossy().into_owned(), name: path.file_name().unwrap_or_default().to_string_lossy().into_owned(), directory: path.is_dir() }
@@ -93,7 +128,7 @@ pub fn run() {
     tauri::Builder::default()
       .manage(History(Mutex::new(Vec::new())))
       .plugin(tauri_plugin_dialog::init())
-      .invoke_handler(tauri::generate_handler![list_folder,apply_renames,undo_renames,undo_count])
+      .invoke_handler(tauri::generate_handler![list_folder,expand_paths,choose_files,choose_folder,apply_renames,undo_renames,undo_count])
       .run(tauri::generate_context!())
       .expect("error while running Enumu");
 }
