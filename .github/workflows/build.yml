@@ -4,6 +4,8 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+env:
+  VITE_BUILD_SHA: ${{ github.sha }}
 permissions:
   contents: read
 jobs:
