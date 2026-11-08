@@ -16,11 +16,15 @@
         "width": 1040,
         "height": 760,
         "minWidth": 520,
-        "minHeight": 440
+        "minHeight": 440,
+        "dragDropEnabled": true
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "capabilities": [
+        "default"
+      ]
     }
   },
   "bundle": {
