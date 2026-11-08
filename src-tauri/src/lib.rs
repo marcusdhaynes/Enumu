@@ -21,8 +21,8 @@ fn list_folder(folder: String) -> Result<Vec<Entry>, String> {
             let e = result.map_err(|e| e.to_string())?;
             let file_type = e.file_type().map_err(|e| e.to_string())?;
             if file_type.is_dir() { pending.push(e.path()); }
-            else if file_type.is_file() {
-                entries.push(Entry { path: e.path().to_string_lossy().into_owned(), name: e.file_name().to_string_lossy().into_owned(), directory: false });
+            if file_type.is_dir() || file_type.is_file() {
+                entries.push(Entry { path: e.path().to_string_lossy().into_owned(), name: e.file_name().to_string_lossy().into_owned(), directory: file_type.is_dir() });
             }
         }
     }
@@ -39,7 +39,7 @@ fn execute(operations: &[(PathBuf,PathBuf)]) -> Result<(),String> {
         if !from.exists() { return Err(format!("Source missing: {}",from.display())); }
         if !sources.insert(from.clone()) || !targets.insert(to.clone()) { return Err("Duplicate source or target".into()); }
         if to.exists() { return Err(format!("Destination already exists: {}",to.display())); }
-        if operations.iter().any(|(other,_)| from != other && other.starts_with(from)) { return Err("Cannot rename a folder and its descendants together".into()); }
+
     }
     let mut completed: Vec<(PathBuf,PathBuf)> = Vec::new();
     for (from,to) in operations {
@@ -62,6 +62,8 @@ fn apply_renames(changes: Vec<Rename>, history: tauri::State<History>) -> Result
         if dest != from { operations.push((from,dest)); }
     }
     if operations.is_empty() { return Err("Nothing to rename".into()); }
+    // Descendants are renamed before ancestors so nested folder and file changes can coexist.
+    operations.sort_by(|a,b| b.0.components().count().cmp(&a.0.components().count()));
     let mut journal = history.0.lock().map_err(|e|e.to_string())?;
     execute(&operations)?;
     let entries = operations.iter().map(|(_,to)|to_entry(to)).collect();
@@ -80,7 +82,7 @@ fn undo_renames(history: tauri::State<History>) -> Result<BatchResult,String> {
     let previous = reverse.iter().map(|(from,_)|from.to_string_lossy().into_owned()).collect();
     let count = reverse.len();
     journal.pop();
-    Ok(BatchResult { count, remaining: journal.len(), entries })
+    Ok(BatchResult { count, remaining: journal.len(), entries, previous })
 }
 #[tauri::command]
 fn undo_count(history: tauri::State<History>) -> Result<usize,String> {
