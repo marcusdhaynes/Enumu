@@ -17,7 +17,7 @@
     const sorted = [...entries].sort((a,b) => slash(a.path).localeCompare(slash(b.path), undefined, { numeric: true }));
     return sorted.filter(e => ![...collapsed].some(p => slash(e.path).startsWith(slash(p) + '/')));
   });
-  function depth(path: string) { const p = slash(path); const root = roots.filter(r => p === slash(r) || p.startsWith(slash(r) + '/')).sort((a,b) => b.length - a.length)[0]; return root ? Math.max(0, p.slice(slash(root).length).split('/').filter(Boolean).length - 1) : 0; }
+  function depth(path: string) { const p = slash(path); const root = roots.filter(r => p === slash(r) || p.startsWith(slash(r) + '/')).sort((a,b) => b.length - a.length)[0]; return root ? p.slice(slash(root).length).split('/').filter(Boolean).length : 0; }
   function toggleFolder(path: string) { const next = new Set(collapsed); next.has(path) ? next.delete(path) : next.add(path); collapsed = next; }
   type BatchResult = { count: number; remaining: number; entries: Entry[]; previous: string[] };
   if ('__TAURI_INTERNALS__' in window) invoke<number>('undo_count').then(n => undoDepth = n).catch(() => {});
@@ -114,7 +114,7 @@
   async function addWebFolder() {
     const picker = (window as Window & { showDirectoryPicker?: () => Promise<DirectoryHandle> }).showDirectoryPicker;
     if (!picker) {
-      status = 'This browser does not support the warning-free folder picker. Use a Chromium-based browser or the desktop app; no upload prompt will be shown.';
+      status = 'Drag a folder from your file manager into this window. Firefox loads it without the upload confirmation.'; dragOver = true;
       return;
     }
     try {
@@ -138,6 +138,78 @@
       status = 'Folder loaded locally, without uploading files';
     } catch (error) {
       if ((error as DOMException)?.name !== 'AbortError') status = 'Folder selection failed: ' + String(error);
+    }
+  }
+  type DroppedEntry = {
+    name: string;
+    isFile: boolean;
+    isDirectory: boolean;
+    createReader?: () => { readEntries: (done: (entries: DroppedEntry[]) => void, fail: (error: DOMException) => void) => void };
+  };
+  const supportsDirectoryPicker = typeof (window as Window & { showDirectoryPicker?: unknown }).showDirectoryPicker === 'function';
+  function dragOverWindow(e: DragEvent) {
+    if (Array.from(e.dataTransfer?.types ?? []).includes('Files')) {
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+      dragOver = true;
+    }
+  }
+  async function droppedDirectory(entry: DroppedEntry, path: string, rows: Entry[]): Promise<void> {
+    rows.push({ path, name: entry.name, directory: true });
+    const reader = entry.createReader?.();
+    if (!reader) return;
+    // A directory reader may return at most 100 entries per call; exhaust every batch.
+    while (true) {
+      const batch = await new Promise<DroppedEntry[]>((resolve, reject) => reader.readEntries(resolve, reject));
+      if (!batch.length) break;
+      for (const child of batch) {
+        const childPath = path + '/' + child.name;
+        if (child.isDirectory) await droppedDirectory(child, childPath, rows);
+        else if (child.isFile) rows.push({ path: childPath, name: child.name, directory: false });
+      }
+    }
+  }
+  async function dropFilesAndFolders(e: DragEvent) {
+    if (!Array.from(e.dataTransfer?.types ?? []).includes('Files')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragOver = false;
+    const data = e.dataTransfer;
+    if (!data) return;
+    // Capture entries synchronously in the drop handler before the browser closes the drag data store.
+    const dropped = Array.from(data.items).filter(item => item.kind === 'file').map(item => {
+      const entryItem = item as DataTransferItem & {
+        webkitGetAsEntry?: () => DroppedEntry | null;
+        getAsEntry?: () => DroppedEntry | null;
+      };
+      return entryItem.getAsEntry?.() ?? entryItem.webkitGetAsEntry?.() ?? null;
+    }).filter((item): item is DroppedEntry => item !== null);
+    const looseFiles = Array.from(data.files);
+    if (!dropped.length && !looseFiles.length) {
+      status = 'No files found. Drop a folder or files from your file manager.';
+      return;
+    }
+    const rows: Entry[] = [];
+    const newRoots: string[] = [];
+    try {
+      if (dropped.length) {
+        for (const entry of dropped) {
+          if (entry.isDirectory) {
+            const root = 'browser/' + entry.name;
+            newRoots.push(root);
+            await droppedDirectory(entry, root, rows);
+          } else if (entry.isFile) {
+            rows.push({ path: 'browser/' + entry.name, name: entry.name, directory: false });
+          }
+        }
+      } else {
+        for (const file of looseFiles) rows.push({ path: 'browser/' + file.name, name: file.name, directory: false });
+      }
+      roots = [...new Set([...roots, ...newRoots])];
+      append([...new Map(rows.map(row => [row.path, row])).values()]);
+      status = rows.length + ' files and folders loaded locally by drag and drop. No upload prompt.';
+    } catch (error) {
+      status = 'Could not read dropped folder: ' + String(error);
     }
   }
   async function webFiles(ev: Event) {
@@ -174,7 +246,7 @@
   function shown(name: string, dir = false) { return settings.hideExtension ? splitName(name, dir)[0] : name; }
 </script>
 <svelte:head><title>Enumu — Batch Renamer</title><meta name="description" content="A beautifully simple, fast batch file renamer."/></svelte:head>
-<svelte:window onkeydown={keys}/><div class="shell">
+<svelte:window onkeydown={keys} ondragover={dragOverWindow} ondrop={dropFilesAndFolders} ondragend={() => dragOver = false}/><div class="shell">
   <header class="topbar"><div class="brand"><div class="brandmark"><span>≡</span><i></i></div><span>enumu</span><span class="version">/ rename studio</span></div><div class="topright"><span class="live-dot"></span>{native ? 'Desktop workspace' : 'Web preview'}<span class="divider"></span><span class="privacy">● Local only</span></div></header>
   <main>
     <div class="workspace">
@@ -198,14 +270,14 @@
         <div class="section-title"><div class="title-left"><span class="section-index">02</span><div><h2>Files <span class="count">{entries.length.toLocaleString()}</span></h2><p>Select files to rename</p></div></div><button class="clear" onclick={() => { entries = []; selected = new Set(); collapsed = new Set(); roots = []; status = 'Queue cleared'; }} disabled={!entries.length}>Clear All ×</button></div>
         <div class="queue-tools"><div class="queue-caption"><span class="live-dot"></span> {entries.length ? chosen.length + ' selected · ' + changed + ' changes' : 'Awaiting files'}</div><div class="selection-tools"><button onclick={selectAll} disabled={!entries.length}>All</button><button onclick={selectNone} disabled={!chosen.length}>None</button><button onclick={undo} disabled={!native || !undoDepth || busy}>↶ Undo {undoDepth}/100</button></div><label class="switch-label"><input type="checkbox" bind:checked={settings.hideExtension}/><span class="switch"></span> Hide extensions</label></div>
         {#if !entries.length}
-          <div class="dropzone" class:dragover={dragOver} ondragover={(e) => { e.preventDefault(); dragOver = true; }} ondragleave={() => dragOver = false} ondrop={(e) => { e.preventDefault(); dragOver = false; status = 'Use Add Files to select files'; }}>
-            <h3>Add Files Or Folders</h3><p>Import items to preview and rename them.</p>
-            <div class="drop-actions">{#if native}<button class="primary" onclick={addPaths}>＋ Add Files</button><button class="secondary" onclick={addFolder}>▤ Add Folder</button>{:else}<label class="primary file-pick">＋ Choose Files<input type="file" multiple onchange={webFiles} hidden /></label><button class="secondary" onclick={addWebFolder}>▤ Choose Folder</button>{/if}</div>
+          <div class="dropzone" class:dragover={dragOver}>
+            <h3>Add Files Or Folders</h3><p>Drag and drop folders or files anywhere in this window—no upload prompt.</p>
+            <div class="drop-actions">{#if native}<button class="primary" onclick={addPaths}>＋ Add Files</button><button class="secondary" onclick={addFolder}>▤ Add Folder</button>{:else}<label class="primary file-pick">＋ Choose Files<input type="file" multiple onchange={webFiles} hidden /></label>{#if supportsDirectoryPicker}<button class="secondary" onclick={addWebFolder}>▤ Choose Folder</button>{:else}<span class="drop-tip">↓ Drop a folder here</span>{/if}{/if}</div>
             <button class="sample" onclick={demo}>Load Sample Files ↗</button>
           </div>
         {:else}
           <div class="queue-table"><div class="queue-header"><span><input aria-label="Select all" type="checkbox" checked={entries.length > 0 && selected.size === entries.length} onchange={e => e.currentTarget.checked ? selectAll() : selectNone()}/></span><span>ORIGINAL NAME</span><span>LIVE PREVIEW ↗</span></div><div class="queue-scroll">{#each displayRows as item, i (item.path)}{@const p = targets.get(item.path)}<div class="queue-row" class:chosen={selected.has(item.path)} role="row" tabindex="0" onclick={e => { if ((e.target as HTMLElement).tagName !== 'INPUT') selectRow(item.path,entries.findIndex(x => x.path === item.path),e.shiftKey,e.ctrlKey || e.metaKey); }} onkeydown={e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); selectRow(item.path,i,e.shiftKey,e.ctrlKey || e.metaKey); } }}><span><input aria-label={'Select ' + item.name} type="checkbox" checked={selected.has(item.path)} onclick={e => e.stopPropagation()} onchange={e => checkRow(item.path,entries.findIndex(x => x.path === item.path),e.currentTarget.checked,(e as MouseEvent).shiftKey)}/></span><div class="filename"><span class="file-indent" style:width={(depth(item.path)*13)+'px'}></span>{#if item.directory}<button class="folder-toggle" aria-label={collapsed.has(item.path) ? 'Expand folder' : 'Collapse folder'} onclick={e => {e.stopPropagation();toggleFolder(item.path);}}>{collapsed.has(item.path) ? '▸' : '▾'}</button>{/if}<span class="file-glyph">{item.directory ? '▤' : '▧'}</span><span title={item.name}>{shown(item.name,item.directory)}</span></div><div class="filename new" class:invalid={!!p && !p.valid}><span title={p?.target ?? item.name}>{p ? shown(p.target,item.directory) : '—'}</span>{#if p?.error}<span class="error">{p.error}</span>{/if}</div></div>{/each}</div></div>
-          <div class="queue-add">{#if native}<button class="secondary" onclick={addPaths}>＋ Add Files</button><button class="secondary" onclick={addFolder}>▤ Add Folder</button>{:else}<label class="secondary file-pick">＋ Add Files<input type="file" multiple onchange={webFiles} hidden /></label><button class="secondary" onclick={addWebFolder}>▤ Add Folder</button>{/if}</div>
+          <div class="queue-add">{#if native}<button class="secondary" onclick={addPaths}>＋ Add Files</button><button class="secondary" onclick={addFolder}>▤ Add Folder</button>{:else}<label class="secondary file-pick">＋ Add Files<input type="file" multiple onchange={webFiles} hidden /></label>{#if supportsDirectoryPicker}<button class="secondary" onclick={addWebFolder}>▤ Add Folder</button>{:else}<span class="drop-tip">↓ Drop a folder anywhere</span>{/if}{/if}</div>
         {/if}
         <div class="queue-footer"><div class="footer-meta"><span class="footer-status" class:error-status={conflicts > 0}>{conflicts ? conflicts + ' conflicts detected' : status}</span><small>{native ? 'Native file operations' : 'Preview mode · No files modified'}</small></div><button class="apply" disabled={!native || busy || !chosen.length || conflicts > 0 || changed === 0 || entries.some(x => x.path.startsWith('demo/'))} onclick={apply}>{native ? 'Apply Renames' : 'Preview Only'} <span>↗</span></button></div>
       </section>
@@ -258,4 +330,5 @@ main{max-width:1480px;padding:12px 12px 10px}
 .bottom{margin-top:10px;font-size:8px}
 @media(max-width:760px){.workspace{grid-template-columns:1fr}.topbar{padding:0 12px}main{padding:9px}.editor-body{padding:10px}.section-title{padding:7px 10px}.dropzone{min-height:110px}.queue-scroll{max-height:50vh}}
 .file-indent{flex:none}.folder-toggle{flex:none;border:0;background:transparent;color:#a7baff;padding:0 2px;font-size:13px}.filename{min-width:0}.filename .file-glyph{flex:none}.queue-scroll{overflow:auto}
+.drop-tip{display:inline-flex;align-items:center;color:#afc1ed;font-size:10px;font-weight:600;padding:4px 8px;border:1px dashed #5a6c8c;border-radius:6px}.dropzone.dragover,.shell:has(.dropzone.dragover) .files{border-color:#b6c5ff;box-shadow:0 0 0 2px #758fee33}.queue-add{flex-wrap:wrap;align-items:center}
 </style>
