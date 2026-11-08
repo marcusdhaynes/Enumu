@@ -1,6 +1,7 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
-  import { open } from '@tauri-apps/plugin-dialog';
+  import { getCurrentWebview } from '@tauri-apps/api/webview';
+  import { onMount } from 'svelte';
   import { plan, splitName, type Entry, type Settings } from './renamer';
   let entries: Entry[] = $state([]);
   let status = $state('Ready');
@@ -89,25 +90,33 @@
   let conflicts = $derived(preview.filter(x => !x.valid).length);
   let native = '__TAURI_INTERNALS__' in window;
   let changed = $derived(preview.filter(x => x.name !== x.target && x.valid).length);
-  async function addPaths() {
-    if (!native) { status = 'Browser mode: choose files for preview. Native renaming requires the desktop app.'; return; }
+  const buildVersion = (import.meta.env.VITE_BUILD_SHA || 'local').slice(0, 7);
+  async function loadNativePaths(paths: string[]) {
+    if (!paths.length) return;
+    busy = true;
     try {
-      const picked = await open({ multiple: true, directory: false });
-      if (!picked) return;
-      const paths = Array.isArray(picked) ? picked : [picked];
-      append(paths.map(path => ({ path, name: path.split(/[\\/]/).pop() ?? path })));
-      status = entries.length + ' files selected';
-    } catch (e) { status = String(e); }
+      const rows = await invoke<Entry[]>('expand_paths', { paths });
+      const directories = new Set(rows.filter(e => e.directory).map(e => e.path));
+      roots = [...new Set([...roots, ...paths.filter(path => directories.has(path))])];
+      append(rows);
+      status = rows.length + ' Files And Folders Loaded';
+    } catch (error) {
+      status = 'Could Not Load Files: ' + String(error);
+    } finally { busy = false; }
+  }
+  async function addPaths() {
+    if (!native || busy) return;
+    try {
+      const paths = await invoke<string[]>('choose_files');
+      await loadNativePaths(paths);
+    } catch (error) { status = 'File Selection Failed: ' + String(error); }
   }
   async function addFolder() {
-    if (!native) { status = 'Folder selection for renaming requires the native app.'; return; }
+    if (!native || busy) return;
     try {
-      const picked = await open({ directory: true, multiple: false });
-      if (!picked || Array.isArray(picked)) return;
-      const rows = await invoke<Entry[]>('list_folder', { folder: picked });
-      roots = [...roots, picked];
-      append(rows); status = rows.length + ' files and folders loaded';
-    } catch (e) { status = String(e); }
+      const path = await invoke<string | null>('choose_folder');
+      if (path) await loadNativePaths([path]);
+    } catch (error) { status = 'Folder Selection Failed: ' + String(error); }
   }
   type DirectoryHandle = { name: string; entries(): AsyncIterable<[string, FileHandle | DirectoryHandle]> };
   type FileHandle = { kind: 'file'; name: string };
@@ -148,6 +157,7 @@
   };
   const supportsDirectoryPicker = typeof (window as Window & { showDirectoryPicker?: unknown }).showDirectoryPicker === 'function';
   function dragOverWindow(e: DragEvent) {
+    if (native) return;
     if (Array.from(e.dataTransfer?.types ?? []).includes('Files')) {
       e.preventDefault();
       if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
@@ -170,6 +180,7 @@
     }
   }
   async function dropFilesAndFolders(e: DragEvent) {
+    if (native) return;
     if (!Array.from(e.dataTransfer?.types ?? []).includes('Files')) return;
     e.preventDefault();
     e.stopPropagation();
@@ -244,10 +255,29 @@
   }
   function demo() { entries = [{ path: 'demo/Summer Holiday.jpg', name: 'Summer Holiday.jpg' }, { path: 'demo/Portrait Final.png', name: 'Portrait Final.png' }, { path: 'demo/Project Notes.pdf', name: 'Project Notes.pdf' }]; selected = new Set(entries.map(e => e.path)); status = 'Sample filenames loaded for preview'; }
   function shown(name: string, dir = false) { return settings.hideExtension ? splitName(name, dir)[0] : name; }
+  onMount(() => {
+    if (!native) return;
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    getCurrentWebview().onDragDropEvent(event => {
+      if (event.payload.type === 'enter' || event.payload.type === 'over') dragOver = true;
+      if (event.payload.type === 'leave') dragOver = false;
+      if (event.payload.type === 'drop') {
+        dragOver = false;
+        void loadNativePaths(event.payload.paths);
+      }
+    }).then(stop => {
+      if (disposed) stop();
+      else unlisten = stop;
+    }).catch(error => {
+      status = 'Native Folder Drop Unavailable: ' + String(error);
+    });
+    return () => { disposed = true; unlisten?.(); };
+  });
 </script>
 <svelte:head><title>Enumu</title><meta name="description" content="A beautifully simple, fast batch file renamer."/></svelte:head>
 <svelte:window onkeydown={keys} ondragover={dragOverWindow} ondrop={dropFilesAndFolders} ondragend={() => dragOver = false}/><div class="shell">
-  <header class="topbar"><div class="brand"><div class="brandmark"><span>≡</span><i></i></div><span>Enumu</span></div><div class="topright"><span class="live-dot"></span>{native ? 'Desktop Workspace' : 'Web Preview'}<span class="divider"></span><span class="privacy">● Local Only</span></div></header>
+  <header class="topbar"><div class="brand"><div class="brandmark"><span>≡</span><i></i></div><span>Enumu</span></div><div class="topright"><span class="live-dot"></span>{native ? 'Desktop Workspace' : 'Web Preview'}<span class="divider"></span><span class="privacy">● Local Only</span><span class="build-version" title="Installed Build Version">Build {buildVersion}</span></div></header>
   <main>
     <div class="workspace">
       <section class="editor">
@@ -276,7 +306,7 @@
             <button class="sample" onclick={demo}>Load Sample Files ↗</button>
           </div>
         {:else}
-          <div class="queue-table"><div class="queue-header"><span><input aria-label="Select all" type="checkbox" checked={entries.length > 0 && selected.size === entries.length} onchange={e => e.currentTarget.checked ? selectAll() : selectNone()}/></span><span>Original Name</span><span>Live Preview ↗</span></div><div class="queue-scroll">{#each displayRows as item, i (item.path)}{@const p = targets.get(item.path)}<div class="queue-row" class:chosen={selected.has(item.path)} role="row" tabindex="0" onclick={e => { if ((e.target as HTMLElement).tagName !== 'INPUT') selectRow(item.path,entries.findIndex(x => x.path === item.path),e.shiftKey,e.ctrlKey || e.metaKey); }} onkeydown={e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); selectRow(item.path,i,e.shiftKey,e.ctrlKey || e.metaKey); } }}><span><input aria-label={'Select ' + item.name} type="checkbox" checked={selected.has(item.path)} onclick={e => e.stopPropagation()} onchange={e => checkRow(item.path,entries.findIndex(x => x.path === item.path),e.currentTarget.checked,(e as MouseEvent).shiftKey)}/></span><div class="filename"><span class="file-indent" style:width={(depth(item.path)*13)+'px'}></span>{#if item.directory}<button class="folder-toggle" aria-label={collapsed.has(item.path) ? 'Expand Folder' : 'Collapse Folder'} onclick={e => {e.stopPropagation();toggleFolder(item.path);}}>{collapsed.has(item.path) ? '▸' : '▾'}</button>{/if}<span class="file-glyph">{item.directory ? '▤' : '▧'}</span><span title={item.name}>{shown(item.name,item.directory)}</span></div><div class="filename new" class:invalid={!!p && !p.valid}><span title={p?.target ?? item.name}>{p ? shown(p.target,item.directory) : '—'}</span>{#if p?.error}<span class="error">{p.error}</span>{/if}</div></div>{/each}</div></div>
+          <div class="queue-table"><div class="queue-header"><span><input aria-label="Select all" type="checkbox" checked={entries.length > 0 && selected.size === entries.length} onchange={e => e.currentTarget.checked ? selectAll() : selectNone()}/></span><span>Original Name</span><span>Live Preview ↗</span></div><div class="queue-scroll">{#each displayRows as item, i (item.path)}{@const p = targets.get(item.path)}<div class="queue-row" class:chosen={selected.has(item.path)} role="row" tabindex="0" onclick={e => { if ((e.target as HTMLElement).tagName !== 'INPUT') selectRow(item.path,entries.findIndex(x => x.path === item.path),e.shiftKey,e.ctrlKey || e.metaKey); }} onkeydown={e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); selectRow(item.path,i,e.shiftKey,e.ctrlKey || e.metaKey); } }}><span><input aria-label={'Select ' + item.name} type="checkbox" checked={selected.has(item.path)} onclick={e => e.stopPropagation()} onchange={e => checkRow(item.path,entries.findIndex(x => x.path === item.path),e.currentTarget.checked,false)}/></span><div class="filename"><span class="file-indent" style:width={(depth(item.path)*13)+'px'}></span>{#if item.directory}<button class="folder-toggle" aria-label={collapsed.has(item.path) ? 'Expand Folder' : 'Collapse Folder'} onclick={e => {e.stopPropagation();toggleFolder(item.path);}}>{collapsed.has(item.path) ? '▸' : '▾'}</button>{/if}<span class="file-glyph">{item.directory ? '▤' : '▧'}</span><span title={item.name}>{shown(item.name,item.directory)}</span></div><div class="filename new" class:invalid={!!p && !p.valid}><span title={p?.target ?? item.name}>{p ? shown(p.target,item.directory) : '—'}</span>{#if p?.error}<span class="error">{p.error}</span>{/if}</div></div>{/each}</div></div>
           <div class="queue-add">{#if native}<button class="secondary" onclick={addPaths}>＋ Add Files</button><button class="secondary" onclick={addFolder}>▤ Add Folder</button>{:else}<label class="secondary file-pick">＋ Add Files<input type="file" multiple onchange={webFiles} hidden /></label>{#if supportsDirectoryPicker}<button class="secondary" onclick={addWebFolder}>▤ Add Folder</button>{:else}<span class="drop-tip">↓ Drop A Folder Anywhere</span>{/if}{/if}</div>
         {/if}
         <div class="queue-footer"><div class="footer-meta"><span class="footer-status" class:error-status={conflicts > 0}>{conflicts ? conflicts + ' Conflicts Detected' : status}</span><small>{native ? 'Native File Operations' : 'Preview Mode · No Files Modified'}</small></div><button class="apply" disabled={!native || busy || !chosen.length || conflicts > 0 || changed === 0 || entries.some(x => x.path.startsWith('demo/'))} onclick={apply}>{native ? 'Apply Renames' : 'Preview Only'} <span>↗</span></button></div>
@@ -353,4 +383,5 @@ main{padding:7px 8px 6px}.workspace{gap:6px;grid-template-columns:minmax(270px,3
 .step-buttons button:disabled{opacity:.3;cursor:not-allowed}
 @media(max-width:760px){.workspace{grid-template-columns:1fr}main{padding:6px}}
 .aligned-value{margin-top:7px}.aligned-value .field-block>label,.aligned-value.field-block>label{display:block;margin:0 0 5px;font-size:11px;line-height:14px;min-height:14px}.aligned-value.field-block>input{margin-top:0;height:28px}.aligned-value .input-wrap{height:28px}.aligned-value .field-block{min-width:0}.aligned-value.two-col{align-items:start}
+.build-version{font-size:9px;letter-spacing:.04em;color:#7886a0;border:1px solid #2e3a4d;padding:3px 6px;border-radius:5px;white-space:nowrap}@media(max-width:600px){.build-version{display:none}}
 </style>
