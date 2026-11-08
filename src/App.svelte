@@ -21,7 +21,6 @@
   function depth(path: string) { const p = slash(path); const root = roots.filter(r => p === slash(r) || p.startsWith(slash(r) + '/')).sort((a,b) => b.length - a.length)[0]; return root ? p.slice(slash(root).length).split('/').filter(Boolean).length : 0; }
   function toggleFolder(path: string) { const next = new Set(collapsed); next.has(path) ? next.delete(path) : next.add(path); collapsed = next; }
   type BatchResult = { count: number; remaining: number; entries: Entry[]; previous: string[] };
-  if ('__TAURI_INTERNALS__' in window) invoke<number>('undo_count').then(n => undoDepth = n).catch(() => {});
   let chosen = $derived(entries.filter(e => selected.has(e.path)));
   let selectedPreview = $derived(plan(chosen, settings));
   let targets = $derived(new Map(selectedPreview.map(p => [p.path, p])));
@@ -88,7 +87,9 @@
   }
   let preview = $derived(plan(chosen, settings));
   let conflicts = $derived(preview.filter(x => !x.valid).length);
-  let native = '__TAURI_INTERNALS__' in window;
+  // Do not treat a Tauri-based browser (such as Minternet) as Enumu's native app.
+  // The native UI is enabled only after our own backend confirms its identity.
+  let native = $state(false);
   let changed = $derived(preview.filter(x => x.name !== x.target && x.valid).length);
   const buildVersion = (import.meta.env.VITE_BUILD_SHA || 'local').slice(0, 7);
   async function loadNativePaths(paths: string[]) {
@@ -256,22 +257,40 @@
   function demo() { entries = [{ path: 'demo/Summer Holiday.jpg', name: 'Summer Holiday.jpg' }, { path: 'demo/Portrait Final.png', name: 'Portrait Final.png' }, { path: 'demo/Project Notes.pdf', name: 'Project Notes.pdf' }]; selected = new Set(entries.map(e => e.path)); status = 'Sample filenames loaded for preview'; }
   function shown(name: string, dir = false) { return settings.hideExtension ? splitName(name, dir)[0] : name; }
   onMount(() => {
-    if (!native) return;
-    let unlisten: (() => void) | undefined;
     let disposed = false;
-    getCurrentWebview().onDragDropEvent(event => {
-      if (event.payload.type === 'enter' || event.payload.type === 'over') dragOver = true;
-      if (event.payload.type === 'leave') dragOver = false;
-      if (event.payload.type === 'drop') {
-        dragOver = false;
-        void loadNativePaths(event.payload.paths);
+    let unlisten: (() => void) | undefined;
+    async function connectNativeRuntime() {
+      if (!('__TAURI_INTERNALS__' in window)) return;
+      try {
+        const identity = await invoke<string>('enumu_runtime_info');
+        if (disposed || identity !== 'com.somniel.enumu') return;
+        native = true;
+        try {
+          const count = await invoke<number>('undo_count');
+          if (!disposed) undoDepth = count;
+        } catch { /* No saved undo history is available. */ }
+        if (disposed) return;
+        try {
+          const stop = await getCurrentWebview().onDragDropEvent(event => {
+            if (event.payload.type === 'enter' || event.payload.type === 'over') dragOver = true;
+            if (event.payload.type === 'leave') dragOver = false;
+            if (event.payload.type === 'drop') {
+              dragOver = false;
+              void loadNativePaths(event.payload.paths);
+            }
+          });
+          if (disposed) stop();
+          else unlisten = stop;
+        } catch (error) {
+          status = 'Native Folder Drop Unavailable: ' + String(error);
+        }
+      } catch {
+        // We may be inside another Tauri-based browser, not the Enumu desktop app.
+        // Keep browser file/folder controls and never invoke that host's native commands.
+        native = false;
       }
-    }).then(stop => {
-      if (disposed) stop();
-      else unlisten = stop;
-    }).catch(error => {
-      status = 'Native Folder Drop Unavailable: ' + String(error);
-    });
+    }
+    void connectNativeRuntime();
     return () => { disposed = true; unlisten?.(); };
   });
 </script>
