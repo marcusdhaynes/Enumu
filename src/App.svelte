@@ -109,6 +109,37 @@
       append(rows); status = rows.length + ' files and folders loaded';
     } catch (e) { status = String(e); }
   }
+  type DirectoryHandle = { name: string; entries(): AsyncIterable<[string, FileHandle | DirectoryHandle]> };
+  type FileHandle = { kind: 'file'; name: string };
+  async function addWebFolder() {
+    const picker = (window as Window & { showDirectoryPicker?: () => Promise<DirectoryHandle> }).showDirectoryPicker;
+    if (!picker) {
+      status = 'This browser does not support the warning-free folder picker. Use a Chromium-based browser or the desktop app; no upload prompt will be shown.';
+      return;
+    }
+    try {
+      const folder = await picker.call(window);
+      const rows: Entry[] = [];
+      const root = 'browser/' + folder.name;
+      rows.push({ path: root, name: folder.name, directory: true });
+      const pending: { handle: DirectoryHandle; path: string }[] = [{ handle: folder, path: root }];
+      while (pending.length) {
+        const current = pending.pop()!;
+        for await (const [name, handle] of current.handle.entries()) {
+          const path = current.path + '/' + name;
+          if ('entries' in handle) {
+            rows.push({ path, name, directory: true });
+            pending.push({ handle, path });
+          } else rows.push({ path, name, directory: false });
+        }
+      }
+      roots = [...new Set([...roots, root])];
+      append(rows);
+      status = 'Folder loaded locally, without uploading files';
+    } catch (error) {
+      if ((error as DOMException)?.name !== 'AbortError') status = 'Folder selection failed: ' + String(error);
+    }
+  }
   async function webFiles(ev: Event) {
     const input = ev.currentTarget as HTMLInputElement;
     const files = Array.from(input.files ?? []);
@@ -169,12 +200,12 @@
         {#if !entries.length}
           <div class="dropzone" class:dragover={dragOver} ondragover={(e) => { e.preventDefault(); dragOver = true; }} ondragleave={() => dragOver = false} ondrop={(e) => { e.preventDefault(); dragOver = false; status = 'Use Add Files to select files'; }}>
             <h3>Add Files Or Folders</h3><p>Import items to preview and rename them.</p>
-            <div class="drop-actions">{#if native}<button class="primary" onclick={addPaths}>＋ Add Files</button><button class="secondary" onclick={addFolder}>▤ Add Folder</button>{:else}<label class="primary file-pick">＋ Choose Files<input type="file" multiple onchange={webFiles} hidden /></label><label class="secondary file-pick">▤ Choose Folder<input type="file" multiple webkitdirectory="" onchange={webFiles} hidden /></label>{/if}</div>
+            <div class="drop-actions">{#if native}<button class="primary" onclick={addPaths}>＋ Add Files</button><button class="secondary" onclick={addFolder}>▤ Add Folder</button>{:else}<label class="primary file-pick">＋ Choose Files<input type="file" multiple onchange={webFiles} hidden /></label><button class="secondary" onclick={addWebFolder}>▤ Choose Folder</button>{/if}</div>
             <button class="sample" onclick={demo}>Load Sample Files ↗</button>
           </div>
         {:else}
           <div class="queue-table"><div class="queue-header"><span><input aria-label="Select all" type="checkbox" checked={entries.length > 0 && selected.size === entries.length} onchange={e => e.currentTarget.checked ? selectAll() : selectNone()}/></span><span>ORIGINAL NAME</span><span>LIVE PREVIEW ↗</span></div><div class="queue-scroll">{#each displayRows as item, i (item.path)}{@const p = targets.get(item.path)}<div class="queue-row" class:chosen={selected.has(item.path)} role="row" tabindex="0" onclick={e => { if ((e.target as HTMLElement).tagName !== 'INPUT') selectRow(item.path,entries.findIndex(x => x.path === item.path),e.shiftKey,e.ctrlKey || e.metaKey); }} onkeydown={e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); selectRow(item.path,i,e.shiftKey,e.ctrlKey || e.metaKey); } }}><span><input aria-label={'Select ' + item.name} type="checkbox" checked={selected.has(item.path)} onclick={e => e.stopPropagation()} onchange={e => checkRow(item.path,entries.findIndex(x => x.path === item.path),e.currentTarget.checked,(e as MouseEvent).shiftKey)}/></span><div class="filename"><span class="file-indent" style:width={(depth(item.path)*13)+'px'}></span>{#if item.directory}<button class="folder-toggle" aria-label={collapsed.has(item.path) ? 'Expand folder' : 'Collapse folder'} onclick={e => {e.stopPropagation();toggleFolder(item.path);}}>{collapsed.has(item.path) ? '▸' : '▾'}</button>{/if}<span class="file-glyph">{item.directory ? '▤' : '▧'}</span><span title={item.name}>{shown(item.name,item.directory)}</span></div><div class="filename new" class:invalid={!!p && !p.valid}><span title={p?.target ?? item.name}>{p ? shown(p.target,item.directory) : '—'}</span>{#if p?.error}<span class="error">{p.error}</span>{/if}</div></div>{/each}</div></div>
-          <div class="queue-add">{#if native}<button class="secondary" onclick={addPaths}>＋ Add Files</button><button class="secondary" onclick={addFolder}>▤ Add Folder</button>{:else}<label class="secondary file-pick">＋ Add Files<input type="file" multiple onchange={webFiles} hidden /></label><label class="secondary file-pick">▤ Add Folder<input type="file" multiple webkitdirectory="" onchange={webFiles} hidden /></label>{/if}</div>
+          <div class="queue-add">{#if native}<button class="secondary" onclick={addPaths}>＋ Add Files</button><button class="secondary" onclick={addFolder}>▤ Add Folder</button>{:else}<label class="secondary file-pick">＋ Add Files<input type="file" multiple onchange={webFiles} hidden /></label><button class="secondary" onclick={addWebFolder}>▤ Add Folder</button>{/if}</div>
         {/if}
         <div class="queue-footer"><div class="footer-meta"><span class="footer-status" class:error-status={conflicts > 0}>{conflicts ? conflicts + ' conflicts detected' : status}</span><small>{native ? 'Native file operations' : 'Preview mode · No files modified'}</small></div><button class="apply" disabled={!native || busy || !chosen.length || conflicts > 0 || changed === 0 || entries.some(x => x.path.startsWith('demo/'))} onclick={apply}>{native ? 'Apply Renames' : 'Preview Only'} <span>↗</span></button></div>
       </section>
