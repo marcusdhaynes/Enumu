@@ -9,7 +9,7 @@ struct Entry { path: String, name: String, directory: bool }
 #[derive(Deserialize)]
 struct Rename { from: String, to_name: String }
 #[derive(serde::Serialize)]
-struct BatchResult { count: usize, remaining: usize, entries: Vec<Entry> }
+struct BatchResult { count: usize, remaining: usize, entries: Vec<Entry>, previous: Vec<String> }
 struct History(Mutex<Vec<Vec<(PathBuf, PathBuf)>>>);
 
 #[tauri::command]
@@ -59,9 +59,10 @@ fn apply_renames(changes: Vec<Rename>, history: tauri::State<History>) -> Result
     let mut journal = history.0.lock().map_err(|e|e.to_string())?;
     execute(&operations)?;
     let entries = operations.iter().map(|(_,to)|to_entry(to)).collect();
+    let previous = operations.iter().map(|(from,_)|from.to_string_lossy().into_owned()).collect();
     journal.push(operations);
     if journal.len() > 100 { journal.remove(0); }
-    Ok(BatchResult { count: journal.last().unwrap().len(), remaining: journal.len(), entries })
+    Ok(BatchResult { count: journal.last().unwrap().len(), remaining: journal.len(), entries, previous })
 }
 #[tauri::command]
 fn undo_renames(history: tauri::State<History>) -> Result<BatchResult,String> {
@@ -70,6 +71,7 @@ fn undo_renames(history: tauri::State<History>) -> Result<BatchResult,String> {
     let reverse: Vec<(PathBuf,PathBuf)> = batch.iter().rev().map(|(a,b)|(b.clone(),a.clone())).collect();
     execute(&reverse)?;
     let entries = reverse.iter().map(|(_,to)|to_entry(to)).collect();
+    let previous = reverse.iter().map(|(from,_)|from.to_string_lossy().into_owned()).collect();
     let count = reverse.len();
     journal.pop();
     Ok(BatchResult { count, remaining: journal.len(), entries })
