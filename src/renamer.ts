@@ -22,7 +22,7 @@ export function plan(entries: Entry[], s: Settings): Preview[] {
       if (index >= 0) name = original.slice(0, index) + original.slice(index + token.length);
     }
     const target = name + ext;
-    const error = !name || name === '.' || name === '..' || /[\\/\0]/.test(target) ? 'Invalid filename' : undefined;
+    const error = !name || name === '.' || name === '..' || target.includes('/') || target.includes(String.fromCharCode(92)) || target.includes(String.fromCharCode(0)) ? 'Invalid filename' : undefined;
     return { ...entry, target, valid: !error, error };
   });
   const seen = new Map<string, number>();
