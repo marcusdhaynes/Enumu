@@ -10,6 +10,15 @@
   let anchor = $state(0);
   let undoDepth = $state(0);
   let busy = $state(false);
+  let collapsed = $state<Set<string>>(new Set());
+  let roots = $state<string[]>([]);
+  const slash = (path: string) => path.replaceAll(String.fromCharCode(92), '/');
+  let displayRows = $derived.by(() => {
+    const sorted = [...entries].sort((a,b) => slash(a.path).localeCompare(slash(b.path), undefined, { numeric: true }));
+    return sorted.filter(e => ![...collapsed].some(p => slash(e.path).startsWith(slash(p) + '/')));
+  });
+  function depth(path: string) { const p = slash(path); const root = roots.filter(r => p === slash(r) || p.startsWith(slash(r) + '/')).sort((a,b) => b.length - a.length)[0]; return root ? Math.max(0, p.slice(slash(root).length).split('/').filter(Boolean).length - 1) : 0; }
+  function toggleFolder(path: string) { const next = new Set(collapsed); next.has(path) ? next.delete(path) : next.add(path); collapsed = next; }
   type BatchResult = { count: number; remaining: number; entries: Entry[]; previous: string[] };
   if ('__TAURI_INTERNALS__' in window) invoke<number>('undo_count').then(n => undoDepth = n).catch(() => {});
   let chosen = $derived(entries.filter(e => selected.has(e.path)));
@@ -48,9 +57,22 @@
     if (e.key === 'Escape') selectNone();
   }
   function reconcile(result: BatchResult) {
-    const updates = new Map(result.previous.map((path, i) => [path, result.entries[i]]));
-    entries = entries.map(e => updates.get(e.path) ?? e);
-    selected = new Set([...selected].map(path => updates.get(path)?.path ?? path));
+    const updates = result.previous.map((path, i) => ({ from: path, to: result.entries[i].path, entry: result.entries[i] }));
+    const translated = (path: string) => {
+      let next = path;
+      for (const u of updates) {
+        if (next === u.from) next = u.to;
+        else if (next.startsWith(u.from + '/') || next.startsWith(u.from + String.fromCharCode(92))) next = u.to + next.slice(u.from.length);
+      }
+      return next;
+    };
+    entries = entries.map(e => {
+      const path = translated(e.path);
+      return { ...e, path, name: path.split(/[\\/]/).pop() ?? e.name };
+    });
+    selected = new Set([...selected].map(translated));
+    collapsed = new Set([...collapsed].map(translated));
+    roots = roots.map(translated);
   }
   async function undo() {
     if (!native || !undoDepth || busy) return;
@@ -83,13 +105,26 @@
       const picked = await open({ directory: true, multiple: false });
       if (!picked || Array.isArray(picked)) return;
       const rows = await invoke<Entry[]>('list_folder', { folder: picked });
-      append(rows); status = rows.length + ' items found';
+      roots = [...roots, picked];
+      append(rows); status = rows.length + ' files and folders loaded';
     } catch (e) { status = String(e); }
   }
   async function webFiles(ev: Event) {
     const input = ev.currentTarget as HTMLInputElement;
     const files = Array.from(input.files ?? []);
-    append(files.map((f, i) => ({ path: 'browser/' + (f.webkitRelativePath || f.name) + '/' + i, name: f.name })));
+    const rows: Entry[] = [];
+    const seen = new Set<string>();
+    for (const file of files) {
+      const rel = file.webkitRelativePath || file.name;
+      const parts = rel.split('/');
+      for (let j = 1; j < parts.length; j++) {
+        const path = 'browser/' + parts.slice(0,j).join('/');
+        if (!seen.has(path)) { seen.add(path); rows.push({ path, name: parts[j-1], directory: true }); }
+      }
+      rows.push({ path: 'browser/' + rel, name: file.name, directory: false });
+      if (parts.length > 1) roots = [...new Set([...roots, 'browser/' + parts[0]])];
+    }
+    append(rows);
     status = 'Browser preview only; no files modified'; input.value = '';
   }
   async function apply() {
@@ -129,7 +164,7 @@
         <div class="editor-foot"><span><span class="tiny-sparkle">✧</span> Non-destructive preview</span><button class="reset" onclick={() => settings = { mode: 'add', kind: 'text', text: '', position: 0, fromEnd: false, start: 1, digits: 2, hideExtension: true }}>↺ Reset Rules</button></div>
       </section>
       <section class="files">
-        <div class="section-title"><div class="title-left"><span class="section-index">02</span><div><h2>Files <span class="count">{entries.length.toLocaleString()}</span></h2><p>Select files to rename</p></div></div><button class="clear" onclick={() => { entries = []; selected = new Set(); status = 'Queue cleared'; }} disabled={!entries.length}>Clear All ×</button></div>
+        <div class="section-title"><div class="title-left"><span class="section-index">02</span><div><h2>Files <span class="count">{entries.length.toLocaleString()}</span></h2><p>Select files to rename</p></div></div><button class="clear" onclick={() => { entries = []; selected = new Set(); collapsed = new Set(); roots = []; status = 'Queue cleared'; }} disabled={!entries.length}>Clear All ×</button></div>
         <div class="queue-tools"><div class="queue-caption"><span class="live-dot"></span> {entries.length ? chosen.length + ' selected · ' + changed + ' changes' : 'Awaiting files'}</div><div class="selection-tools"><button onclick={selectAll} disabled={!entries.length}>All</button><button onclick={selectNone} disabled={!chosen.length}>None</button><button onclick={undo} disabled={!native || !undoDepth || busy}>↶ Undo {undoDepth}/100</button></div><label class="switch-label"><input type="checkbox" bind:checked={settings.hideExtension}/><span class="switch"></span> Hide extensions</label></div>
         {#if !entries.length}
           <div class="dropzone" class:dragover={dragOver} ondragover={(e) => { e.preventDefault(); dragOver = true; }} ondragleave={() => dragOver = false} ondrop={(e) => { e.preventDefault(); dragOver = false; status = 'Use Add Files to select files'; }}>
@@ -138,7 +173,7 @@
             <button class="sample" onclick={demo}>Load Sample Files ↗</button>
           </div>
         {:else}
-          <div class="queue-table"><div class="queue-header"><span><input aria-label="Select all" type="checkbox" checked={entries.length > 0 && selected.size === entries.length} onchange={e => e.currentTarget.checked ? selectAll() : selectNone()}/></span><span>ORIGINAL NAME</span><span>LIVE PREVIEW ↗</span></div><div class="queue-scroll">{#each entries as item, i (item.path)}{@const p = targets.get(item.path)}<div class="queue-row" class:chosen={selected.has(item.path)} role="row" tabindex="0" onclick={e => { if ((e.target as HTMLElement).tagName !== 'INPUT') selectRow(item.path,i,e.shiftKey,e.ctrlKey || e.metaKey); }} onkeydown={e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); selectRow(item.path,i,e.shiftKey,e.ctrlKey || e.metaKey); } }}><span><input aria-label={'Select ' + item.name} type="checkbox" checked={selected.has(item.path)} onclick={e => e.stopPropagation()} onchange={e => checkRow(item.path,i,e.currentTarget.checked,(e as MouseEvent).shiftKey)}/></span><div class="filename"><span class="file-glyph">{item.directory ? '▤' : '▧'}</span><span title={item.name}>{shown(item.name,item.directory)}</span></div><div class="filename new" class:invalid={!!p && !p.valid}><span title={p?.target ?? item.name}>{p ? shown(p.target,item.directory) : '—'}</span>{#if p?.error}<span class="error">{p.error}</span>{/if}</div></div>{/each}</div></div>
+          <div class="queue-table"><div class="queue-header"><span><input aria-label="Select all" type="checkbox" checked={entries.length > 0 && selected.size === entries.length} onchange={e => e.currentTarget.checked ? selectAll() : selectNone()}/></span><span>ORIGINAL NAME</span><span>LIVE PREVIEW ↗</span></div><div class="queue-scroll">{#each displayRows as item, i (item.path)}{@const p = targets.get(item.path)}<div class="queue-row" class:chosen={selected.has(item.path)} role="row" tabindex="0" onclick={e => { if ((e.target as HTMLElement).tagName !== 'INPUT') selectRow(item.path,entries.findIndex(x => x.path === item.path),e.shiftKey,e.ctrlKey || e.metaKey); }} onkeydown={e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); selectRow(item.path,i,e.shiftKey,e.ctrlKey || e.metaKey); } }}><span><input aria-label={'Select ' + item.name} type="checkbox" checked={selected.has(item.path)} onclick={e => e.stopPropagation()} onchange={e => checkRow(item.path,entries.findIndex(x => x.path === item.path),e.currentTarget.checked,(e as MouseEvent).shiftKey)}/></span><div class="filename"><span class="file-indent" style:width={(depth(item.path)*13)+'px'}></span>{#if item.directory}<button class="folder-toggle" aria-label={collapsed.has(item.path) ? 'Expand folder' : 'Collapse folder'} onclick={e => {e.stopPropagation();toggleFolder(item.path);}}>{collapsed.has(item.path) ? '▸' : '▾'}</button>{/if}<span class="file-glyph">{item.directory ? '▤' : '▧'}</span><span title={item.name}>{shown(item.name,item.directory)}</span></div><div class="filename new" class:invalid={!!p && !p.valid}><span title={p?.target ?? item.name}>{p ? shown(p.target,item.directory) : '—'}</span>{#if p?.error}<span class="error">{p.error}</span>{/if}</div></div>{/each}</div></div>
           <div class="queue-add">{#if native}<button class="secondary" onclick={addPaths}>＋ Add Files</button><button class="secondary" onclick={addFolder}>▤ Add Folder</button>{:else}<label class="secondary file-pick">＋ Add Files<input type="file" multiple onchange={webFiles} hidden /></label><label class="secondary file-pick">▤ Add Folder<input type="file" multiple webkitdirectory="" onchange={webFiles} hidden /></label>{/if}</div>
         {/if}
         <div class="queue-footer"><div class="footer-meta"><span class="footer-status" class:error-status={conflicts > 0}>{conflicts ? conflicts + ' conflicts detected' : status}</span><small>{native ? 'Native file operations' : 'Preview mode · No files modified'}</small></div><button class="apply" disabled={!native || busy || !chosen.length || conflicts > 0 || changed === 0 || entries.some(x => x.path.startsWith('demo/'))} onclick={apply}>{native ? 'Apply Renames' : 'Preview Only'} <span>↗</span></button></div>
@@ -191,4 +226,5 @@ main{max-width:1480px;padding:12px 12px 10px}
 .footer-status{font-size:10px}.footer-meta small{font-size:9px}
 .bottom{margin-top:10px;font-size:8px}
 @media(max-width:760px){.workspace{grid-template-columns:1fr}.topbar{padding:0 12px}main{padding:9px}.editor-body{padding:10px}.section-title{padding:7px 10px}.dropzone{min-height:110px}.queue-scroll{max-height:50vh}}
+.file-indent{flex:none}.folder-toggle{flex:none;border:0;background:transparent;color:#a7baff;padding:0 2px;font-size:13px}.filename{min-width:0}.filename .file-glyph{flex:none}.queue-scroll{overflow:auto}
 </style>
