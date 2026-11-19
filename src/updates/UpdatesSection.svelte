@@ -13,7 +13,7 @@
 <section aria-label="Updates" style="border-top:1px solid rgba(127,127,127,0.3);padding-top:16px;margin-top:16px;">
   <h3 style="margin:0 0 8px;font-size:14px;">Updates</h3>
   <div style="font-size:13px;display:flex;flex-direction:column;gap:4px;">
-    <div>Current version: <strong>{CURRENT_VERSION === 'unknown' ? 'Unknown' : `v${CURRENT_VERSION}`}</strong></div>
+    <div>Current version: <strong>{String(CURRENT_VERSION) === 'unknown' ? 'Unknown' : `v${CURRENT_VERSION}`}</strong></div>
     <div>Available version: <strong>{update ? `v${update.version}` : checked && !checking ? 'None — you are up to date' : '—'}</strong></div>
   </div>
   {#if update?.notes}
